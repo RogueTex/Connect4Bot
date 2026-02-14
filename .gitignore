@@ -33,5 +33,8 @@ env/
 .DS_Store
 Thumbs.db
 
+# Markdown / docs (keep local only)
+*.md
+
 # Anvil app clone (clone separately per ANVIL_CLONE.md)
 anvil-files/Connect_4/
