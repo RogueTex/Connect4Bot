@@ -1,7 +1,7 @@
 # Connect4 Anvil backend – runs in Docker on EC2/Lightsail.
 #
-# Exposes get_ai_move(board) and check_winner_server(board, piece). No Anvil client
-# code changes needed. Set ANVIL_UPLINK_KEY and MODEL_PATH below before deployment.
+# Exposes get_ai_move(board, model_type) and check_winner_server(board, piece).
+# model_type is "cnn" or "transformer". Set ANVIL_UPLINK_KEY and both MODEL_PATH_* below.
 
 import numpy as np
 import anvil.server
@@ -13,11 +13,12 @@ from connect4_policy_player import policy_move_with_rules
 # Get your Uplink key from the Anvil app: App → Settings → Uplink
 ANVIL_UPLINK_KEY = "server_LHX5YY2FM3VENGWKOFBRDFEF-ZYMBBJME4FOBYPVB"
 
-# Container path to the model file. The volume maps host /home to container /FOLDERNAME.
-# EC2 Ubuntu:   /FOLDERNAME/ubuntu/connect4app/connect4_cnn_best.keras
-# Lightsail:   /FOLDERNAME/bitnami/connect4app/connect4_cnn_best.keras
-# Put your .keras or .h5 file in the same folder as server.py on the server.
-MODEL_PATH = "/FOLDERNAME/ubuntu/connect4app/connect4_cnn_best.keras"
+# Container paths to the model files. The volume maps host /home to container /FOLDERNAME.
+# EC2 Ubuntu:   /FOLDERNAME/ubuntu/connect4app/...
+# Lightsail:   /FOLDERNAME/bitnami/connect4app/...
+# Put both .keras (or .h5) files in the same folder as server.py on the server.
+MODEL_PATH_CNN = "/FOLDERNAME/ubuntu/connect4app/connect4_cnn_best.keras"
+MODEL_PATH_TRANSFORMER = "/FOLDERNAME/ubuntu/connect4app/connect4_transformer_best.keras"
 
 
 class SimpleConnect4:
@@ -86,8 +87,9 @@ class SimpleConnect4:
         return np.stack([ch0, ch1], axis=-1)
 
 
-# Load model once at startup
-model = keras.models.load_model(MODEL_PATH)
+# Load both models once at startup
+model_cnn = keras.models.load_model(MODEL_PATH_CNN)
+model_transformer = keras.models.load_model(MODEL_PATH_TRANSFORMER)
 
 
 @anvil.server.callable
@@ -113,12 +115,14 @@ def check_winner_server(board, piece):
 
 
 @anvil.server.callable
-def get_ai_move(board):
+def get_ai_move(board, model_type="cnn"):
     """
-    Returns the AI (policy) move for the current board. Board: 6x7 list of lists.
-    Uses 0 = empty, 1 and -1 (or 1 and 2; 2 is normalized to -1) for the two players.
+    Returns the AI (policy) move for the current board.
+    board: 6x7 list of lists. 0 = empty, 1 and 2 (or 1 and -1) for the two players.
+    model_type: "cnn" or "transformer" (which bot to play against).
     Current player is inferred from the number of pieces on the board.
     """
+    model = model_transformer if (model_type or "").lower() == "transformer" else model_cnn
     # Normalize: if Anvil uses 1 and 2, convert 2 -> -1 for the policy player
     grid = [list(row) for row in board]
     has_two = any(cell == 2 for row in grid for cell in row)
