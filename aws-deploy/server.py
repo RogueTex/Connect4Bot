@@ -11,7 +11,7 @@ from connect4_policy_player import policy_move_with_rules
 
 # ----- Configuration: set these for your deployment -----
 # Get your Uplink key from the Anvil app: App → Settings → Uplink
-ANVIL_UPLINK_KEY = "PASTE_YOUR_ANVIL_UPLINK_KEY"  # From Anvil: App → Settings → Uplink (do not commit real key)
+ANVIL_UPLINK_KEY = "server_LHX5YY2FM3VENGWKOFBRDFEF-ZYMBBJME4FOBYPVB"
 
 # Container path to the model file. The volume maps host /home to container /FOLDERNAME.
 # EC2 Ubuntu:   /FOLDERNAME/ubuntu/connect4app/connect4_cnn_best.keras
