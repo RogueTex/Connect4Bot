@@ -1,5 +1,6 @@
-# Data and model outputs
+# Data and model outputs (do not push datasets)
 *.npz
+*.npy
 *.pkl
 *.pickle
 *.keras
