@@ -1,4 +1,0 @@
-# Inference only: CPU build is enough (models are already trained). Smaller image, faster pull.
-numpy==1.21.6
-tensorflow-cpu==2.9.1
-anvil-uplink==0.3.36
