@@ -1,0 +1,36 @@
+# Data and model outputs
+*.npz
+*.pkl
+*.pickle
+*.keras
+*.h5
+Connect4_Combined/
+Connect4_FAST/
+Connect4_DeepSearch/
+Connect4_*_Output/
+datasets/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.env
+*.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Anvil app clone (clone separately per ANVIL_CLONE.md)
+anvil-files/Connect_4/
