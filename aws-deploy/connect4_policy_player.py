@@ -24,7 +24,7 @@ def find_winning_move(game, player):
     return None
 
 
-def policy_move_with_rules(game, model, perspective=1):
+def policy_move_with_rules(game, model, perspective=1, return_debug=False):
     """
     Get the best move for the current player using:
     1. Win check: if we can win, play it
@@ -35,24 +35,43 @@ def policy_move_with_rules(game, model, perspective=1):
     model: Keras model expecting (batch, 6, 7, 2) input, returns (batch, 7) softmax
     perspective: 1 for plus, -1 for minus (encoding perspective)
 
-    Returns: column 0-6
+    Returns:
+      - int column 0-6 (default)
+      - (int, dict) if return_debug=True
     """
+    debug = {
+        "decision_source": None,
+        "win_col": None,
+        "block_col": None,
+        "legal_moves": game.legal_moves(),
+        "raw_probs": None,
+        "scores": None,
+    }
+
     # 1. Win check
     win_col = find_winning_move(game, game.current_player)
     if win_col is not None:
-        return win_col
+        debug["decision_source"] = "win_rule"
+        debug["win_col"] = int(win_col)
+        return (int(win_col), debug) if return_debug else int(win_col)
 
     # 2. Block check
     block_col = find_winning_move(game, -game.current_player)
     if block_col is not None:
-        return block_col
+        debug["decision_source"] = "block_rule"
+        debug["block_col"] = int(block_col)
+        return (int(block_col), debug) if return_debug else int(block_col)
 
     # 3. Model with legal-move masking
     x = game.encode(perspective=perspective)[None, ...]
     probs = model.predict(x, verbose=0)[0]
-    legal = game.legal_moves()
+    legal = debug["legal_moves"]
     mask = np.full(7, -1e9, dtype=np.float32)
     for c in legal:
         mask[c] = 0.0
     scores = probs + mask
-    return int(np.argmax(scores))
+    col = int(np.argmax(scores))
+    debug["decision_source"] = "model"
+    debug["raw_probs"] = [float(v) for v in probs.tolist()]
+    debug["scores"] = [float(v) for v in scores.tolist()]
+    return (col, debug) if return_debug else col

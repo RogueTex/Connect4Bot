@@ -7,6 +7,9 @@ services:
     # FOLDERNAME = container path where host /home is mounted (e.g. app at /home/ubuntu/connect4app -> /FOLDERNAME/ubuntu/connect4app)
     volumes:
       - /home:/FOLDERNAME
+    environment:
+      - ENABLE_GAME_LOGGING=1
+      - GAME_LOG_PATH=/FOLDERNAME/ubuntu/connect4_game_logs.jsonl
     build: 
       # build the image from the Dockerfile in the current directory
       context: .
