@@ -5,7 +5,7 @@
 # - check_winner_server(board, piece)
 # - start_game_log(model_type="cnn", game_id=None, metadata=None)
 # - log_game_result(game_id, result, winner=None, final_board=None, metadata=None)
-# model_type is "cnn", "cnn2", or "transformer". Set ANVIL_UPLINK_KEY and MODEL_PATH_* below.
+# model_type is "cnn" or "transformer". Set ANVIL_UPLINK_KEY and MODEL_PATH_* below.
 
 import json
 import os
@@ -26,7 +26,6 @@ ANVIL_UPLINK_KEY = "server_LHX5YY2FM3VENGWKOFBRDFEF-ZYMBBJME4FOBYPVB"
 # Container paths to the model files. The volume maps host /home to container /FOLDERNAME.
 # Files in /home/ubuntu/ on host -> /FOLDERNAME/ubuntu/ in container. Use .keras (Keras 3 format; requires TF 2.16+).
 MODEL_PATH_CNN = "/FOLDERNAME/ubuntu/connect4_cnn_final.keras"
-MODEL_PATH_CNN2 = "/FOLDERNAME/ubuntu/connect4_cnn_v2_final.keras"
 MODEL_PATH_TRANSFORMER = "/FOLDERNAME/ubuntu/connect4_transformer_final.keras"
 
 # Optional game-decision logging for model improvement loops.
@@ -134,12 +133,6 @@ CUSTOM_OBJECTS = {"BoardPatchEmbedding": BoardPatchEmbedding, "SinusoidalPositio
 
 # Load models once at startup (Transformer needs custom_objects for custom layers)
 model_cnn = keras.models.load_model(MODEL_PATH_CNN)
-try:
-    model_cnn2 = keras.models.load_model(MODEL_PATH_CNN2)
-except Exception as exc:
-    print(f"Warning: could not load CNN2 model at {MODEL_PATH_CNN2}: {exc}")
-    print("Falling back to CNN v1 model for model_type='cnn2'.")
-    model_cnn2 = model_cnn
 model_transformer = keras.models.load_model(MODEL_PATH_TRANSFORMER, custom_objects=CUSTOM_OBJECTS)
 
 
@@ -246,7 +239,7 @@ def get_ai_move(board, model_type="cnn", game_id=None, metadata=None):
     """
     Returns the AI (policy) move for the current board.
     board: 6x7 list of lists. 0 = empty, 1 and 2 (or 1 and -1) for the two players.
-    model_type: "cnn", "cnn2", or "transformer" (which bot to play against).
+    model_type: "cnn" or "transformer" (which bot to play against).
     game_id: optional stable id for joining move logs with final outcome logs.
     metadata: optional dict for extra context (difficulty, client version, etc).
     Current player is inferred from the number of pieces on the board.
@@ -254,8 +247,6 @@ def get_ai_move(board, model_type="cnn", game_id=None, metadata=None):
     model_key = (model_type or "cnn").lower()
     if model_key == "transformer":
         model = model_transformer
-    elif model_key == "cnn2":
-        model = model_cnn2
     else:
         model = model_cnn
     # Normalize: if Anvil uses 1 and 2, convert 2 -> -1 for the policy player

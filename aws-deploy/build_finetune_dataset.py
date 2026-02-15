@@ -49,7 +49,7 @@ def main():
     parser.add_argument(
         "--keep-model",
         default="",
-        help="Optional model filter (cnn/cnn2/transformer). Empty means keep all.",
+        help="Optional model filter (cnn/transformer). Empty means keep all.",
     )
     args = parser.parse_args()
 
