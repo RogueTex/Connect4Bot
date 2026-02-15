@@ -1,0 +1,2 @@
+# TensorFlow + numpy come from the Docker base image. Only install uplink here.
+anvil-uplink==0.3.36
