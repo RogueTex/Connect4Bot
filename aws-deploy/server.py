@@ -5,7 +5,8 @@
 # - check_winner_server(board, piece)
 # - start_game_log(model_type="cnn", game_id=None, metadata=None)
 # - log_game_result(game_id, result, winner=None, final_board=None, metadata=None)
-# model_type is "cnn" or "transformer". Set ANVIL_UPLINK_KEY and MODEL_PATH_* below.
+# - run_ai_watch_games(num_games=10, player1_model="cnn2", player2_model="cnn", ...)
+# model_type is "cnn", "cnn2", or "transformer". Set ANVIL_UPLINK_KEY and MODEL_PATH_* below.
 
 import json
 import os
@@ -26,6 +27,7 @@ ANVIL_UPLINK_KEY = "server_LHX5YY2FM3VENGWKOFBRDFEF-ZYMBBJME4FOBYPVB"
 # Container paths to the model files. The volume maps host /home to container /FOLDERNAME.
 # Files in /home/ubuntu/ on host -> /FOLDERNAME/ubuntu/ in container. Use .keras (Keras 3 format; requires TF 2.16+).
 MODEL_PATH_CNN = "/FOLDERNAME/ubuntu/connect4_cnn_final.keras"
+MODEL_PATH_CNN2 = "/FOLDERNAME/ubuntu/connect4_cnn_v2_final.keras"
 MODEL_PATH_TRANSFORMER = "/FOLDERNAME/ubuntu/connect4_transformer_final.keras"
 
 # Optional game-decision logging for model improvement loops.
@@ -133,6 +135,12 @@ CUSTOM_OBJECTS = {"BoardPatchEmbedding": BoardPatchEmbedding, "SinusoidalPositio
 
 # Load models once at startup (Transformer needs custom_objects for custom layers)
 model_cnn = keras.models.load_model(MODEL_PATH_CNN)
+try:
+    model_cnn2 = keras.models.load_model(MODEL_PATH_CNN2)
+except Exception as exc:
+    print(f"Warning: could not load CNN2 model at {MODEL_PATH_CNN2}: {exc}")
+    print("Falling back to CNN v1 model for model_type='cnn2'.")
+    model_cnn2 = model_cnn
 model_transformer = keras.models.load_model(MODEL_PATH_TRANSFORMER, custom_objects=CUSTOM_OBJECTS)
 
 
@@ -163,6 +171,27 @@ def _normalize_game_result(result):
     if val in {"draw", "tie", "stalemate"}:
         return "draw"
     return val
+
+
+def _resolve_model(model_type):
+    key = (model_type or "cnn").strip().lower()
+    if key == "transformer":
+        return key, model_transformer
+    if key == "cnn2":
+        return key, model_cnn2
+    return "cnn", model_cnn
+
+
+def _normalize_board(board):
+    # Normalize: if client uses 1 and 2, convert 2 -> -1 for the policy player.
+    grid = [list(row) for row in board]
+    has_two = any(cell == 2 for row in grid for cell in row)
+    if has_two:
+        for r in range(6):
+            for c in range(7):
+                if grid[r][c] == 2:
+                    grid[r][c] = -1
+    return np.array(grid, dtype=np.int8)
 
 
 @anvil.server.callable
@@ -235,29 +264,170 @@ def log_game_result(game_id, result, winner=None, final_board=None, metadata=Non
 
 
 @anvil.server.callable
+def run_ai_watch_games(
+    num_games=10,
+    player1_model="cnn2",
+    player2_model="cnn",
+    opening_random_moves=0,
+    seed=None,
+    metadata=None,
+):
+    """
+    Run AI-vs-AI games and log the full lifecycle.
+    Returns summary stats so UI can display results.
+    """
+    try:
+        n_games = max(1, int(num_games))
+    except Exception:
+        n_games = 10
+    try:
+        opening_n = max(0, min(12, int(opening_random_moves)))
+    except Exception:
+        opening_n = 0
+
+    p1_key, p1_model = _resolve_model(player1_model)
+    p2_key, p2_model = _resolve_model(player2_model)
+
+    rng = np.random.default_rng(seed)
+    summary = {
+        "num_games": n_games,
+        "player1_model": p1_key,
+        "player2_model": p2_key,
+        "player1_wins": 0,
+        "player2_wins": 0,
+        "draws": 0,
+        "total_moves": 0,
+    }
+
+    for game_index in range(n_games):
+        gid = str(uuid.uuid4())
+        base_meta = metadata if isinstance(metadata, dict) else {}
+        game_meta = dict(base_meta)
+        game_meta.update(
+            {
+                "mode": "ai_watch",
+                "game_index": game_index,
+                "player1_model": p1_key,
+                "player2_model": p2_key,
+                "opening_random_moves": opening_n,
+            }
+        )
+        _append_game_log(
+            {
+                "event_type": "game_start",
+                "timestamp_utc": _utc_now_iso(),
+                "game_id": gid,
+                "model_type": f"{p1_key}_vs_{p2_key}",
+                "metadata": game_meta,
+            }
+        )
+
+        game = SimpleConnect4()
+
+        # Optional random opening for diversity; not included in ai_move events.
+        for _ in range(opening_n):
+            if game.winner != 0:
+                break
+            legal = game.legal_moves()
+            if not legal:
+                break
+            col = int(rng.choice(legal))
+            move_turn = int(np.count_nonzero(game.grid))
+            board_before = game.grid.copy()
+            actor = "player1" if game.current_player == 1 else "player2"
+            actor_model = p1_key if actor == "player1" else p2_key
+            game.make_move(col)
+            _append_game_log(
+                {
+                    "event_type": "random_opening_move",
+                    "timestamp_utc": _utc_now_iso(),
+                    "game_id": gid,
+                    "turn_index": move_turn,
+                    "current_player": int(-game.current_player),
+                    "actor_side": actor,
+                    "actor_model": actor_model,
+                    "board_hash": hashlib.sha1(board_before.tobytes()).hexdigest(),
+                    "board": board_before.tolist(),
+                    "chosen_col": col,
+                    "metadata": game_meta,
+                }
+            )
+
+        while game.winner == 0 and game.legal_moves():
+            turn_index = int(np.count_nonzero(game.grid))
+            actor = "player1" if game.current_player == 1 else "player2"
+            actor_model_key, actor_model = (p1_key, p1_model) if actor == "player1" else (p2_key, p2_model)
+            board_before = game.grid.copy()
+            col, debug = policy_move_with_rules(
+                game,
+                actor_model,
+                perspective=game.current_player,
+                return_debug=True,
+            )
+            _append_game_log(
+                {
+                    "event_type": "ai_move",
+                    "timestamp_utc": _utc_now_iso(),
+                    "game_id": gid,
+                    "model_type": actor_model_key,
+                    "turn_index": turn_index,
+                    "current_player": int(game.current_player),
+                    "actor_side": actor,
+                    "actor_model": actor_model_key,
+                    "opponent_model": p2_key if actor == "player1" else p1_key,
+                    "board_hash": hashlib.sha1(board_before.tobytes()).hexdigest(),
+                    "board": board_before.tolist(),
+                    "chosen_col": int(col),
+                    "decision_source": debug.get("decision_source"),
+                    "win_col": debug.get("win_col"),
+                    "block_col": debug.get("block_col"),
+                    "legal_moves": debug.get("legal_moves"),
+                    "raw_probs": debug.get("raw_probs"),
+                    "scores": debug.get("scores"),
+                    "metadata": game_meta,
+                }
+            )
+            game.make_move(int(col))
+            summary["total_moves"] += 1
+
+        if game.winner == 1:
+            summary["player1_wins"] += 1
+            winner_model = p1_key
+        elif game.winner == -1:
+            summary["player2_wins"] += 1
+            winner_model = p2_key
+        else:
+            summary["draws"] += 1
+            winner_model = None
+
+        _append_game_log(
+            {
+                "event_type": "game_end",
+                "timestamp_utc": _utc_now_iso(),
+                "game_id": gid,
+                "result": "draw" if winner_model is None else ("player1_win" if game.winner == 1 else "player2_win"),
+                "winner": int(game.winner),
+                "winner_model": winner_model,
+                "final_board": game.grid.tolist(),
+                "metadata": game_meta,
+            }
+        )
+
+    return summary
+
+
+@anvil.server.callable
 def get_ai_move(board, model_type="cnn", game_id=None, metadata=None):
     """
     Returns the AI (policy) move for the current board.
     board: 6x7 list of lists. 0 = empty, 1 and 2 (or 1 and -1) for the two players.
-    model_type: "cnn" or "transformer" (which bot to play against).
+    model_type: "cnn", "cnn2", or "transformer" (which bot to play against).
     game_id: optional stable id for joining move logs with final outcome logs.
     metadata: optional dict for extra context (difficulty, client version, etc).
     Current player is inferred from the number of pieces on the board.
     """
-    model_key = (model_type or "cnn").lower()
-    if model_key == "transformer":
-        model = model_transformer
-    else:
-        model = model_cnn
-    # Normalize: if Anvil uses 1 and 2, convert 2 -> -1 for the policy player
-    grid = [list(row) for row in board]
-    has_two = any(cell == 2 for row in grid for cell in row)
-    if has_two:
-        for r in range(6):
-            for c in range(7):
-                if grid[r][c] == 2:
-                    grid[r][c] = -1
-    grid = np.array(grid, dtype=np.int8)
+    model_key, model = _resolve_model(model_type)
+    grid = _normalize_board(board)
     # Infer current player: even number of pieces -> player 1, odd -> player -1
     n_pieces = np.count_nonzero(grid)
     turn_index = int(n_pieces)
