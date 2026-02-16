@@ -38,3 +38,6 @@ Thumbs.db
 
 # Anvil app clone (clone separately per ANVIL_CLONE.md)
 anvil-files/Connect_4/
+
+# Local virtualenv variants
+.venv-*/
