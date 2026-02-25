@@ -4,6 +4,8 @@ Course project for **RM294 — Spring 2026**.
 
 This project delivers a production-style Connect 4 system with a browser UI, cloud inference backend, and a full training pipeline for policy models. The deployed application supports two model backends: a residual CNN (`cnn2`, default) and a Transformer policy model.
 
+**Try Live:** [Launch the app](https://msba25optim2-group30.anvil.app/)
+
 ![Connect 4 landing](assetsForReadme/Connect%204%20Image.png)
 
 ![Gameplay](assetsForReadme/Gameplay.gif)
