@@ -2,43 +2,93 @@
 
 Course project for **RM294 — Spring 2026**.
 
-A Connect 4 web app built with Anvil that calls an AWS/Lightsail Uplink backend to run trained models (CNN v2 as the default CNN, plus a Transformer option).
+This project delivers a production-style Connect 4 system with a browser UI, cloud inference backend, and a full training pipeline for policy models. The deployed application supports two model backends: a residual CNN (`cnn2`, default) and a Transformer policy model.
 
 ![Connect 4 landing](assetsForReadme/Connect%204%20Image.png)
 
 ![Gameplay](assetsForReadme/Gameplay.gif)
 
-## What We Built
+## System Overview
 
-- **Anvil UI** with login, gameplay, and a CNN vs Transformer model selector.
-- **Uplink backend on AWS/Lightsail** that loads models and serves `get_ai_move` and `check_winner_server`.
-- **Training pipeline** using MCTS data and CNN/Transformer notebooks.
+- **Frontend**: Anvil-based app with authentication, gameplay loop, and model selection.
+- **Backend**: AWS/Lightsail Uplink service exposing `get_ai_move` and `check_winner_server`.
+- **Model serving**: Runtime loads trained `.keras` checkpoints and applies legal-move constraints before returning a move.
+- **Data logging**: Gameplay and generation outputs are persisted as JSONL for analysis and targeted fine-tuning.
 
-## Data + Modeling
+## Training Pipeline
 
-- **Game data generation**: Self-play and MCTS rollouts were used to create state-action pairs for training. Logs are stored as JSONL for later analysis and finetuning.
-- **Modeling strategy**: CNN v2 is the default policy model, with a Transformer model available as an alternative. Inference uses a policy + rules filter for legal moves.
-- **Metrics (summary)**: We tracked win rates in head-to-head evaluation and sanity-checked policy quality with AI-vs-AI games and human playtests.
+Primary notebooks:
+- `training/Connect4_CNN_Transformer_Training.ipynb`
+- `training/Connect4_CNN_Only_Training.ipynb`
+- `training/Connect4_CNN2_Loss_Finetune_Colab.ipynb`
 
-## How It Works (High Level)
+### Dataset and Input Representation
 
-1. User plays in the Anvil app.
-2. The Anvil client calls server functions via Uplink.
-3. The AWS container loads the model(s) and returns the AI move.
-4. Game results and optional logs are persisted as JSONL.
+- Main supervised dataset: `datasets/connect4_combined_unique.npz`
+- Executed split used in training: **Train 636,100 / Val 79,512 / Test 79,512**
+- Input tensor: `(6, 7, 2)` board state
+- Target: 7-way policy classification (column index `0-6`)
 
-## Deployment Steps (Summary)
+### Data Pipeline and Augmentation
 
-1. **Anvil**: Enable Uplink and get the Uplink key.
-2. **AWS/Lightsail**: Upload `aws-deploy/` and model files to the instance.
-3. **Configure**: Set `ANVIL_UPLINK_KEY` and model paths in `aws-deploy/server.py`.
-4. **Run**:
+- `tf.data` pipeline with shuffle (`20,000` buffer), batching, and `prefetch(tf.data.AUTOTUNE)`
+- Training augmentation: horizontal flip with probability `0.5`, with consistent label remap `y = 6 - y`
+- Validation/test: one-hot encoding only (no augmentation)
+
+### Optimization Strategy
+
+- `BATCH_SIZE = 256`
+- `INIT_LR = 1e-3`, `FINETUNE_LR = 1e-5`
+- `EPOCHS_PHASE1 = 60`, conditional `EPOCHS_FINETUNE = 10`
+- `TARGET_VAL_ACC = 0.72`, `EARLY_STOP_PATIENCE = 10`
+- Warmup + cosine learning-rate schedule (`WARMUP_EPOCHS = 3`)
+- Mixed precision enabled (`mixed_float16`)
+
+### CNN Model (Default)
+
+- Residual CNN on `(6, 7, 2)` input with a convolutional stem and **10 residual blocks**
+- BatchNorm/ReLU stack, global average pooling, dense head, and dropout
+- Loss: categorical cross-entropy with label smoothing (`0.05`)
+- Metrics include accuracy and top-2 accuracy
+- Two-phase training: best checkpoint save, then low-LR fine-tune if validation target is not reached
+- Observed run metrics: ~**0.651** validation accuracy and ~**0.649** test accuracy
+
+### Transformer Model
+
+- Board-token Transformer in the same training flow:
+  - board flattened to 42 tokens and projected via `BoardPatchEmbedding`
+  - sinusoidal positional encoding
+  - **8 pre-LN transformer blocks** (`EMBED_DIM = 256`, `NUM_HEADS = 8`, `FF_DIM = 512`)
+- Classification head: global average pooling + dense projection to 7-way softmax
+- Same scheduler/callback and two-phase fine-tune policy as CNN
+- Observed run metrics: ~**0.572** validation accuracy and ~**0.573** test accuracy
+
+### Targeted CNN Loss-Correction Fine-Tune
+
+- `training/Connect4_CNN2_Loss_Finetune_Colab.ipynb` fine-tunes saved CNN checkpoints on game-log correction data (`finetune_loss_cnn2_teacher*.npz`)
+- Typical settings: `BATCH_SIZE = 128`, `EPOCHS = 28`, `LEARNING_RATE = 2e-5`
+- Uses `EarlyStopping` and `ReduceLROnPlateau`
+
+## Inference Flow
+
+1. User move is submitted through the Anvil app.
+2. Uplink backend receives board state and active model selection.
+3. Model inference returns policy scores.
+4. Backend applies legal-move filtering and returns a valid move.
+5. Optional logs are written for post-hoc evaluation and further fine-tuning.
+
+## Deployment (Summary)
+
+1. Enable Uplink in Anvil and obtain the Uplink key.
+2. Upload `aws-deploy/` and model artifacts to the Lightsail instance.
+3. Configure `ANVIL_UPLINK_KEY` and model paths in `aws-deploy/server.py`.
+4. Start services:
    - `docker-compose build`
    - `docker-compose up -d`
    - `docker-compose logs -f`
-5. **Verify**: Uplink shows “Connected” and the app returns AI moves.
+5. Verify Uplink connectivity and end-to-end move generation from the UI.
 
-If the published Anvil URL is used, ensure the Uplink is routed to the published environment or enable “Send server calls from other environments to this Uplink”.
+If using the published Anvil URL, ensure Uplink routing is set to the published environment (or enable cross-environment server-call routing to the active Uplink).
 
 ## Links
 
@@ -47,15 +97,15 @@ If the published Anvil URL is used, ensure the Uplink is routed to the published
 
 ## Repository Structure
 
-- `anvil-files/` — Anvil app source (client + server modules, theme assets)
-- `aws-deploy/` — Dockerized Uplink backend (server, compose, requirements)
-- `training/` — Model training notebooks
-- `dataset_generators/` — Data generation utilities
-- `assets/` — UI and report assets used in the project
-- `assetsForReadme/` — README screenshots and gameplay GIF
-- `FilesOnLightsail/` — Snapshot of files staged on the Lightsail instance
+- `anvil-files/` - Anvil app source (client/server modules and UI assets)
+- `aws-deploy/` - Dockerized Uplink backend and deployment config
+- `training/` - Model training and fine-tuning notebooks
+- `dataset_generators/` - Data generation and preprocessing utilities
+- `assets/` - Project/report assets
+- `assetsForReadme/` - README images and gameplay GIF
+- `FilesOnLightsail/` - Snapshot of files staged on Lightsail
 
 ## Notes
 
-- CNN v2 is the active CNN model used by the UI (mapped to `cnn2`).
-- Transformer model is optional and can be disabled if memory constrained.
+- `cnn2` is the active CNN model path used by the UI by default.
+- Transformer inference is available as an alternative model option.
