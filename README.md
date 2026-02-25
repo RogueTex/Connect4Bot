@@ -109,3 +109,4 @@ If using the published Anvil URL, ensure Uplink routing is set to the published 
 
 - `cnn2` is the active CNN model path used by the UI by default.
 - Transformer inference is available as an alternative model option.
+- Authentication supports open email/password signup and Google sign-in for public access.
