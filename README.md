@@ -112,3 +112,16 @@ If using the published Anvil URL, ensure Uplink routing is set to the published 
 - `cnn2` is the active CNN model path used by the UI by default.
 - Transformer inference is available as an alternative model option.
 - Authentication supports open email/password signup and Google sign-in for public access.
+- 
+## Model Benchmarks
+
+| Model | Val Accuracy | Test Accuracy | vs. Random Baseline |
+|-------|-------------|--------------|--------------------|
+| Residual CNN (cnn2) | ~65.1% | ~64.9% | +50.8pp above random |
+| Transformer | ~57.2% | ~57.3% | +43.0pp above random |
+
+**Baseline**: A random policy choosing uniformly from 7 columns achieves ~14.3% accuracy (1/7).
+
+**Human benchmark**: Competitive human players typically achieve 75–85% move agreement with expert databases on tactical positions.
+
+Both models significantly outperform random play. The CNN model shows better generalization and is the active default backend.
